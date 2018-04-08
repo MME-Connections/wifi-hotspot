@@ -770,17 +770,17 @@ wget -c https://drive.google.com/file/d/1fzTjN3DIUAysXuPOZISosTDpPZtSnpYt/view?u
 
 This captive portal image contained in the gzip archive is over 32GB in size when uncompressed. To uncompress the archive, you need to use certain programs to uncompress it. If you have any trouble, try these programs 
 
-Windows users, 7-Zip.
-Mac users, The Unarchiver.
-Linux users, gzip or tar.
+* Windows users, 7-Zip.
+* Mac users, The Unarchiver.
+* Linux users, gzip or tar.
 
 ### Write the disc image to microSD card
 
 Put your microSD card into your computer and write the disc image to it. You’ll need a specific program to do this:
 
-Windows users, Win32 Disk Imager.
-Mac users, use the disk utility that’s already on your machine.
-Linux people, Etcher – which also works on Mac and Windows – is what the Raspberry Pi Foundation recommends.
+* Windows users, Win32 Disk Imager.
+* Mac users, use the disk utility that’s already on your machine.
+* Linux people, Etcher – which also works on Mac and Windows – is what the Raspberry Pi Foundation recommends.
 
 ### Put the microSD card in Pi and boot up
 
@@ -827,6 +827,7 @@ MME Captive Portal
 ```
 
 **Hotspot users**
+
 You may add users in the radcheck table of radius database. Use mysql client or the daloRADIUS web app in adding hotspot users.
 
 ```console
