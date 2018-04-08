@@ -20,7 +20,11 @@ In order to build a captive portal solution, we will need the following:
 
 * **Nginx** – a proxy server.
 
-* **daloRadius** – an advanced RADIUS web platform aimed at managing Hotspots and general-purpose ISP deployments.
+* **hotspot-login**  – a login utility for CoovaChilli. 
+
+* **daloRadius** – (optional) an advanced RADIUS web platform aimed at managing Hotspots and general-purpose ISP deployments.
+
+* **dnsmasq**  – a small, open-source application that’s designed to provide DNS
 
 ## RaspberryPi
 
@@ -44,7 +48,7 @@ sudo vim /etc/hostapd/hostapd.conf
 Change the following parameters in hostapd.conf file:
 
 ```bash
-interface=wlan0 # Change this to your wireless device
+interface=wlan0 # Change this to your wifi interface
 driver=nl80211
 ssid=MyWiFiHotspot  # Change this to your SSID
 #hw_mode=g
@@ -52,12 +56,9 @@ channel=1 # Enter your desired channel
 macaddr_acl=0
 auth_algs=1
 ignore_broadcast_ssid=0
-wpa=3
-wpa_passphrase=0123456789password  # Change this to your wifi password
-wpa_key_mgmt=WPA-PSK
-wpa_pairwise=TKIP
-rsn_pairwise=CCMP
 ```
+**_Note: 
+You have to delete all the comments in the hostpad config file. Hostapd doesn't support comments in the config file._**
 
 Test and start hostapd:
 
@@ -135,6 +136,7 @@ Create radius database.
 ```console
 mysqladmin -u root -p raspbian create radius
 ```
+### Configure MySQL database for FreeRadius
 
 Generate database tables using MySQL schema.
 
@@ -268,7 +270,7 @@ sudo apt-get install -y -f debhelper devscripts libcurl4-gnutls-dev haserl g++ g
 Clone the project to your directory
 
 ```console
-git clone https://github.com/coova/coova-chilli.git
+git clone https://github.com/MME-Connections/coova-chilli.git
 ```
 
 Once cloned, move inside it. 
@@ -290,6 +292,12 @@ sudo dpkg -i coova-chilli_<latest_version_here>_<architecture_here>.deb
 ```
 
 ### Starting CoovaChilli
+
+Don’t forget to enable CoovaChilli to start in /etc/default/chilli
+
+```console
+START_CHILLI=1
+```
 
 To start CoovaChilli, run the following command
 
@@ -360,7 +368,22 @@ HS_TCP_PORTS="80 443"
 HS_ADMUSR=coovachillispot
 HS_ADMPWD=coovachillispot
 ```
-Edit the file /etc/chilli/up.sh with execution permission:
+
+### Network routing
+We should not forget to enable packet forwarding and setup NAT (network address translation).
+
+To enable packet forwarding, permanently set forwarding by editing the /etc/sysctl.conf file. Find and edit the following line, replacing 0 with 1.
+
+```bash
+net.ipv4.ip_forward = 1
+```
+Execute the following command to enable the change to the sysctl.conf file.
+
+```console
+ sysctl -p /etc/sysctl.conf
+```
+ 
+Edit the file /etc/chilli/up.sh with execution permission. At the end of file, paste the following
 
 ```bash
 #Enable NAT
@@ -395,38 +418,28 @@ enable the service to start up at boot
 sudo systemctl enable nginx
 ```
 
-## daloRADIUS
+## Hotspot Login
 
-### Download daloRADIUS
+### Installation
 
-We configure daloRADIUS hotspotlogin into your desired webroot folder (/var/www/hotspot.example.com).
+Download the source and unzip the file
 
 ```console
-wget -c https://github.com/lirantal/daloradius/archive/master.zip -O daloradius.master.zip
-unzip daloradius.master.zip
+wget -c https://github.com/MME-Connections/hotspot-login/archive/master.zip -O hotspot-login-master.zip
+
+unzip hotspot-login-master.zip
 ```
 
-Create webroot folder for the hotspot domain name, copy the captive portal login page and move daloradius in that webroot folder
+Create webroot folder for the hotspot domain name, copy the hotspot-login in the webroot folder
 
 ```console
 sudo mkdir /var/www/hotspot.example.com
-cp -r daloradius-master/contrib/chilli/portal2/hotspotlogin/* /var/www/hotspot.example.com/
-sudo mv daloradius-master /var/www/hotspot.example.com/daloradius
-```
-
-Modify the MySQL database for FreeRadius
-```console
-mysql -u root -praspbian radius < /var/www/hotspot.example.com/daloradius/contrib/db/fr2-mysql-daloradius-and-freeradius.sql
-```
-
-Re-insert our test user.
-```console
-echo "insert into radcheck (username, attribute, op, value) values ('usertest', 'Cleartext-Password', ':=', 'passwd');" | mysql -u root -praspbian radius
+mv hotspot-login-master /var/www/hotspot.example.com/
 ```
 
 ### Create a server block in nginx
 
-Create the server block file that will tell Nginx on how to process the hotspot login web app and daloRADIUS.
+Create the server block file that will tell Nginx on how to process the hotspot login utility.
 
 ```console
 sudo vim /etc/nginx/sites-available/hotspot.example.com
@@ -464,25 +477,6 @@ server {
 		try_files $uri $uri/ /index.php?$args /hotspotlogin.php?$args $uri/ =404;
 	}
     
-	location /daloradius {
-		alias /var/www/hotspot.example.com/daloradius;
-	}
-
-	location ~ ^/daloradius(.+\.php)$ {
-		alias /var/www/hotspot.example.com/daloradius;
-		fastcgi_index index.php;
-		fastcgi_param SCRIPT_FILENAME /var/www/hotspot.example.com/daloradius$1;
-		include fastcgi_params;
-		fastcgi_pass unix:/run/php/php7.1-fpm.sock; # check the php-fpm.conf configuration regarding the path of listen directive
-	}
-
-	location ~ ^/daloradius/(.*\.(eot|otf|woff|ttf|css|js|jpg|jpeg|gif|png|ico|zip|tgz|gz|rar|bz2|xls|tar|bmp))$ {
-		alias /var/www/hotspot.example.com/daloradius/$1;
-		expires 30d;
-		log_not_found off;
-		access_log off;
-	}
-
 	location ~ \.php$ {
 		include snippets/fastcgi-php.conf;
 		fastcgi_pass unix:/run/php/php7.1-fpm.sock; # check the php-fpm.conf configuration listen directive
@@ -514,7 +508,7 @@ sudo systemctl restart nginx
 ```
 
 
-### Modify configuration in CoovaChilli and in the captive portal login page
+### Modify configuration in CoovaChilli and in the hotspot-login
 
 
 Edit /etc/chilli/config.
@@ -526,6 +520,8 @@ sudo vi /etc/chilli/config
 ```bash
 #   Use HS_UAMFORMAT to define the actual captive portal url.
 HS_UAMFORMAT=https://\$HS_UAMLISTEN/hotspotlogin.php
+
+HS_UAMHOMEPAGE=http://\$HS_UAMLISTEN:\$HS_UAMPORT/prelogin
 ```
 
 
@@ -555,7 +551,6 @@ sudo systemctl start nginx
 sudo systemctl start hostapd
 ```
 
-
 ## Testing your captive portal
 
 Using a wireless client like smartphone or laptop, click the Wi-Fi icon in your laptop's Menu bar, or open the Settings app and tap Wi-Fi on an iPad or Android phone, and choose the Wi-Fi hotspot.
@@ -569,7 +564,138 @@ password: passwd
 
 That should be it. You should now be able to browse the internet on your laptop or smartphone.
 
-##  Bonus: Dnsmasq
+## daloRADIUS (Optional)
+
+### Download daloRADIUS
+
+We configure daloRADIUS hotspotlogin into your desired webroot folder (/var/www/hotspotmgmt.example.com).
+
+```console
+wget -c https://github.com/MME-Connections/daloradius/archive/master.zip -O daloradius.master.zip
+unzip daloradius.master.zip
+```
+
+Create webroot folder for the hotspot domain name, copy the captive portal login page and move daloradius in that webroot folder
+
+```console
+sudo mkdir /var/www/hotspotmgmt.example.com
+cp -r daloradius-master/contrib/chilli/portal2/hotspotlogin/* /var/www/hotspotmgmt.example.com/
+sudo mv daloradius-master /var/www/hotspotmgmt.example.com/daloradius
+```
+
+Modify the MySQL database for FreeRadius
+```console
+mysql -u root -praspbian radius < /var/www/hotspotmgmt.example.com/daloradius/contrib/db/fr2-mysql-daloradius-and-freeradius.sql
+```
+
+Re-insert our test user.
+```console
+echo "insert into radcheck (username, attribute, op, value) values ('usertest', 'Cleartext-Password', ':=', 'passwd');" | mysql -u root -praspbian radius
+```
+
+### Create a server block in nginx
+
+Create the server block file that will tell Nginx on how to process the hotspot login web app and daloRADIUS.
+
+```console
+sudo vim /etc/nginx/sites-available/hotspotmgmt.example.com
+```
+
+Copy the following lines and paste it into the server block file
+
+```bash
+server {
+	# Redirect all HTTP traffic to HTTPS since daloRADIUS requires an HTTPS connection
+	listen :80 default_server; # Change this to match your HotSpot IP address
+	server_name hotspotmgmt.example.com; # Change this to your domain name
+	return 301 https://$server_name$request_uri;
+}
+
+server {
+	listen :443 ssl default_server; # Change this to match your HotSpot IP address
+        server_name hotspotmgmt.example.com;  # Change this to your domain name
+
+        # Self signed certs generated by the ssl-cert package
+        # Don't use them in a production server!
+        include snippets/snakeoil.conf;
+
+	# Replace your signed ssl certificate 
+	# ssl_certificate /etc/ssl/certs/<public_key_of_ssl_certificate_here>.pem;
+	# ssl_certificate_key /etc/ssl/private/<private_key_of_ssl_certificate_here>.key;
+
+
+	root /var/www/hotspotmgmt.example.com; # Change this to match the folder of your hotspot app
+	index index.php index.phtml index.html index.htm;
+
+	location / {
+		# First attempt to serve request as file, then
+		# as directory, then fall back to displaying a 404.
+		try_files $uri $uri/ /index.php?$args $uri/ =404;
+	}
+    
+	location /daloradius {
+		alias /var/www/hotspotmgmt.example.com/daloradius;
+	}
+
+	location ~ ^/daloradius(.+\.php)$ {
+		alias /var/www/hotspotmgmt.example.com/daloradius;
+		fastcgi_index index.php;
+		fastcgi_param SCRIPT_FILENAME /var/www/hotspotmgmt.example.com/daloradius$1;
+		include fastcgi_params;
+		fastcgi_pass unix:/run/php/php7.1-fpm.sock; # check the php-fpm.conf configuration regarding the path of listen directive
+	}
+
+	location ~ ^/daloradius/(.*\.(eot|otf|woff|ttf|css|js|jpg|jpeg|gif|png|ico|zip|tgz|gz|rar|bz2|xls|tar|bmp))$ {
+		alias /var/www/hotspotmgmt.example.com/daloradius/$1;
+		expires 30d;
+		log_not_found off;
+		access_log off;
+	}
+
+	location ~ \.php$ {
+		include snippets/fastcgi-php.conf;
+		fastcgi_pass unix:/run/php/php7.1-fpm.sock; # check the php-fpm.conf configuration listen directive
+	}
+}
+```
+
+That is all we need for a basic configuration. Save and close the file to exit.
+
+### Enable the server block and restart nginx
+
+Now that we have our server block file, we need to enable them. We can do this by creating symbolic links from these files to the sites-enabled directory, which Nginx reads from during startup.
+
+We can create these links by typing:
+
+```console
+sudo ln -s /etc/nginx/sites-available/hotspotmgmt.example.com /etc/nginx/sites-enabled/
+```
+
+Next, test to make sure that there are no syntax errors in any of your Nginx files:
+
+```console
+sudo nginx -t
+```
+If no problems were found, restart Nginx to enable your changes:
+
+```console
+sudo systemctl restart nginx
+```
+
+### Restart nginx to test the hotspot management
+
+Let’s now start the nginx.
+
+```console
+sudo systemctl restart hostapd
+```
+
+Access the hotspot management in your browser
+
+```console
+https://hotspotmgmt.example.com/daloradius
+```
+##  Dnsmasq
 
 Dnsmasq is a small, open-source application that’s designed to provide DNS and, optionally, Dynamic Host Configuration Protocol (DHCP), addressing to a small network. It also supports IPv4 and IPv6 static and dynamic DHCP.
 
@@ -620,3 +746,98 @@ sudo systemctl start dnsmasq
 ```
 
 You may  now reboot the system and make sure CoovaChilli started up fine.
+
+## Installation of Raspbian captive portal disk image 
+
+In this tutorial, we're going to install Raspbian captive portal onto your  microSD card.
+
+You'll need to consider the following before starting the installation:
+
+* 32Gb SD card 
+* image writing tool
+
+### Download the image
+
+You may download the disk image of this captive portal solution at [Google Drive](https://drive.google.com/file/d/1fzTjN3DIUAysXuPOZISosTDpPZtSnpYt/view?usp=sharing) 
+
+```console
+wget -c https://drive.google.com/file/d/1fzTjN3DIUAysXuPOZISosTDpPZtSnpYt/view?usp=sharing
+```
+
+
+
+### Uncompress the file
+
+This captive portal image contained in the gzip archive is over 32GB in size when uncompressed. To uncompress the archive, you need to use certain programs to uncompress it. If you have any trouble, try these programs 
+
+Windows users, 7-Zip.
+Mac users, The Unarchiver.
+Linux users, gzip or tar.
+
+### Write the disc image to microSD card
+
+Put your microSD card into your computer and write the disc image to it. You’ll need a specific program to do this:
+
+Windows users, Win32 Disk Imager.
+Mac users, use the disk utility that’s already on your machine.
+Linux people, Etcher – which also works on Mac and Windows – is what the Raspberry Pi Foundation recommends.
+
+### Put the microSD card in Pi and boot up
+
+Put that microSD into Rasberry Pi, plug in the peripherals and power source, and enjoy.
+
+
+### Accesss credentials
+
+The following are the access credentials in the Raspbian captive portal. You may tweak it for yourself.
+
+**Raspbian user**
+```console
+username: pi
+password: raspberry
+```
+
+**MySQL user**
+```console
+username: root
+password: raspbian
+```
+
+**MySQL user for radius database**
+
+```console
+username: appdemoradius
+password: raspbian
+```
+
+**FreeRADIUS shared secret**
+
+```console
+appdemosecret
+```
+
+**CoovaChilli UAM secret**
+```console
+appdemouamsecret
+```
+
+**Hotspot SSID**
+```console
+MME Captive Portal
+```
+
+**Hotspot users**
+You may add users in the radcheck table of radius database. Use mysql client or the daloRADIUS web app in adding hotspot users.
+
+```console
+username: demo
+password: passwd
+
+username: usertest
+password: passwd
+
+username: mme
+password: passwd
+```
+
+
